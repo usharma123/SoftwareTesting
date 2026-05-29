@@ -1,0 +1,2 @@
+# Embedded clone used for local library testing (has its own .git)
+lib-testing/prowide-core/

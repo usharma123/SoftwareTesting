@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "deepsec": {
+      "source": "vercel-labs/deepsec",
+      "sourceType": "github",
+      "skillPath": "packages/deepsec/SKILL.md",
+      "computedHash": "a2b14e8f4a8884bd098f7ee9407966aabd743bc957e97592623dfdd410c910f9"
+    }
+  }
+}
