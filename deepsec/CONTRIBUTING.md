@@ -42,6 +42,29 @@ pnpm bundle             # esbuild → packages/deepsec/dist/{cli,config}.mjs
 pnpm test:bundle        # bundle e2e: runs the produced binary as a subprocess
 ```
 
+Run the full local gVisor explore harness:
+
+```bash
+make explore-harness PROJECT_ID=<id> TARGET_ROOT=<path>
+```
+
+The Make target calls `scripts/explore-harness.sh`, which runs setup, doctor,
+explore, CI artifact generation, manifest creation, and evidence-bundle
+verification. Run it from the repo root so `.env.local` or `.env` is picked up
+by the CLI. Add `STUB_MODEL=1` for a no-OpenRouter harness smoke test. The
+script reuses the local explore image when it already exists; add
+`FORCE_SETUP=1` to rebuild it. Fresh checkouts should run `corepack enable`,
+`pnpm install`, and `pnpm bundle` first because the script uses the bundled CLI
+when available and falls back to `pnpm deepsec` otherwise.
+
+The default harness path keeps repeat runs compact: host-only doctor checks,
+compact evidence bundles, and manifest verification through the bundle step.
+Set `FULL_DOCTOR=1`, `INCLUDE_ATTEMPTS=1`, or `VERIFY_MANIFEST=1` when the
+extra checks or raw attempt artifacts are needed.
+
+The harness writes CI artifacts by default, but accepted findings only fail the
+wrapper when `FAIL_ON_ACCEPTED_FINDINGS=1` is set.
+
 All of build, test, lint, and knip must pass before a PR is mergeable.
 PRs that touch the publish surface (anything imported via `deepsec/config`)
 must also pass `pnpm test:bundle`.

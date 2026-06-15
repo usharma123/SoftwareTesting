@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const BUNDLE = path.join(ROOT, "packages/deepsec/dist/cli.mjs");
 const FIXTURES = path.join(ROOT, "fixtures/vulnerable-app");
+const HARNESS_SCRIPT = path.join(ROOT, "scripts/explore-harness.sh");
 
 function runBundle(
   args: string[],
@@ -31,6 +32,24 @@ function makeWorkspace(): string {
   // `deepsec/config` (workspace symlink) and the externalized native deps.
   fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"), "dir");
   return dir;
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
+): { stdout: string; stderr: string; status: number } {
+  const result = spawnSync(command, args, {
+    cwd: opts.cwd ?? ROOT,
+    env: { ...process.env, ...(opts.env ?? {}) },
+    encoding: "utf-8",
+    timeout: 60_000,
+  });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    status: result.status ?? -1,
+  };
 }
 
 describe("bundle e2e", () => {
@@ -181,6 +200,49 @@ describe("bundle e2e", () => {
     expect(stdout).toContain("--no-export-json");
     expect(stdout).toContain("--no-export-sarif");
     expect(stdout).toContain("--no-junit");
+  });
+
+  it("contributor explore harness script exposes efficient setup controls", () => {
+    const syntax = runCommand("bash", ["-n", HARNESS_SCRIPT]);
+    expect(syntax.status, syntax.stderr).toBe(0);
+
+    const { stdout, status } = runCommand(HARNESS_SCRIPT, ["--help"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("make explore-harness");
+    expect(stdout).toContain("--force-setup");
+    expect(stdout).toContain("--skip-setup");
+    expect(stdout).toContain("--full-doctor");
+    expect(stdout).toContain("--verify-manifest");
+    expect(stdout).toContain("--include-attempts");
+    expect(stdout).toContain("--stub-model");
+    expect(stdout).toContain("--data-root");
+  });
+
+  it("Makefile exposes the explore harness entrypoint and forwards efficiency flags", () => {
+    const { stdout, status, stderr } = runCommand("make", [
+      "-n",
+      "explore-harness",
+      "PROJECT_ID=fixture",
+      "TARGET_ROOT=fixtures/vulnerable-app",
+      "STUB_MODEL=1",
+      "SKIP_SETUP=1",
+      "FORCE_SETUP=1",
+      "FULL_DOCTOR=1",
+      "VERIFY_MANIFEST=1",
+      "INCLUDE_ATTEMPTS=1",
+      "DEEPSEC_DATA_ROOT=/tmp/deepsec-harness-test",
+    ]);
+    expect(status, stderr).toBe(0);
+    expect(stdout).toContain('PROJECT_ID="fixture"');
+    expect(stdout).toContain('TARGET_ROOT="fixtures/vulnerable-app"');
+    expect(stdout).toContain('STUB_MODEL="1"');
+    expect(stdout).toContain('SKIP_SETUP="1"');
+    expect(stdout).toContain('FORCE_SETUP="1"');
+    expect(stdout).toContain('FULL_DOCTOR="1"');
+    expect(stdout).toContain('VERIFY_MANIFEST="1"');
+    expect(stdout).toContain('INCLUDE_ATTEMPTS="1"');
+    expect(stdout).toContain('DEEPSEC_DATA_ROOT="/tmp/deepsec-harness-test"');
+    expect(stdout).toContain("./scripts/explore-harness.sh");
   });
 
   it("config.d.ts is self-contained (no internal @deepsec/* re-exports)", () => {
