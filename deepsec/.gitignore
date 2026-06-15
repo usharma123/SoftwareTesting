@@ -1,0 +1,13 @@
+node_modules/
+dist/
+# Root-level only; `.deepsec/data/` is intentionally tracked.
+/data/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+.env*.local
+.DS_Store
+.claude
+linear-*
+plans/
