@@ -33,6 +33,47 @@ For expensive models such as `anthropic/claude-opus-4.8`, reduce `OPENROUTER_MAX
 
 DeepSec asks OpenRouter for structured JSON responses: strict JSON Schema for file ranking and JSON-object mode for focused agent/validation turns. If a provider rejects `response_format`, DeepSec retries that request without it and relies on the canonical JSON prompt plus local parser validation/repair.
 
+## Contributor Harness Script
+
+Contributors can run the local setup, preflight, exploration, CI artifact
+generation, manifest creation, and evidence-bundle verification through the
+repo script:
+
+```sh
+PROJECT_ID=prowide-core \
+TARGET_ROOT=../lib-testing/prowide-core \
+  ./scripts/explore-harness.sh
+```
+
+The same flow is available through Make:
+
+```sh
+make explore-harness PROJECT_ID=prowide-core TARGET_ROOT=../lib-testing/prowide-core
+```
+
+Run these commands from the `deepsec/` repo root so `.env.local` or `.env`
+is loaded by the CLI. Use `STUB_MODEL=1` or `--stub-model` to test the harness
+without OpenRouter model calls. The script reuses an existing local explore
+image by default; pass `FORCE_SETUP=1` or `--force-setup` when you need to
+rebuild it.
+
+For repeated runs, the default path keeps preflight and packaging compact:
+`doctor` checks host prerequisites without the target-root container preflight,
+the portable bundle omits raw attempt transcripts, and `bundle` performs the
+manifest verification internally before copying artifacts. Use
+`FULL_DOCTOR=1`, `INCLUDE_ATTEMPTS=1`, or `VERIFY_MANIFEST=1` when you need
+those extra checks or forensic artifacts.
+
+The script uses `packages/deepsec/dist/cli.mjs` when it exists. If the bundle
+is missing, it falls back to `pnpm deepsec`, so fresh checkouts should run
+`corepack enable`, `pnpm install`, and `pnpm bundle` first. This repo expects
+Node 22 or newer and `pnpm@8.15.9`.
+
+By default, the wrapper writes CI artifacts without failing on accepted
+findings. Use `FAIL_ON_ACCEPTED_FINDINGS=1` with Make or `--fail-on-findings`
+with the script when the harness run should fail on validated findings at or
+above `MIN_SEVERITY`.
+
 ## Setup
 
 Build the local Java/Gradle explore image:

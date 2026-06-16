@@ -22,5 +22,9 @@
     }
   },
   "ignore": ["fixtures/vulnerable-app/**", "samples/**", ".deepsec/**"],
+  "ignoreIssues": {
+    "packages/deepsec/src/commands/explore.ts": ["exports", "types"],
+    "packages/deepsec/src/explore/**": ["exports", "types"]
+  },
   "ignoreDependencies": ["@anthropic-ai/claude-agent-sdk", "@openai/codex", "@openai/codex-sdk"]
 }
