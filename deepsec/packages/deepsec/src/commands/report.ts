@@ -1,8 +1,9 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { FileRecord, Finding, Severity } from "@deepsec/core";
 import { loadAllFileRecords, readProjectConfig, reportJsonPath, reportMdPath } from "@deepsec/core";
-import { BOLD, DIM, RESET, severityColor } from "../formatters.js";
+import { BOLD, DIM, RESET, severityColor, YELLOW } from "../formatters.js";
 import { resolveProjectId } from "../resolve-project-id.js";
 
 const REPORTED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "HIGH_BUG", "BUG", "LOW"];
@@ -117,7 +118,31 @@ function findingSources(
   return sources;
 }
 
-export async function reportCommand(opts: { projectId?: string; runId?: string }) {
+export interface ReportCommandOptions {
+  projectId?: string;
+  runId?: string;
+  open?: boolean;
+}
+
+export function openMarkdownReport(
+  reportPath: string,
+  platform = process.platform,
+  run = spawnSync,
+): boolean {
+  const command =
+    platform === "darwin"
+      ? { file: "open", args: ["-a", "Cursor", reportPath] }
+      : platform === "win32"
+        ? { file: "cmd", args: ["/c", "start", "", reportPath] }
+        : { file: "xdg-open", args: [reportPath] };
+  const result = run(command.file, command.args, {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  return !result.error && result.status === 0;
+}
+
+export async function reportCommand(opts: ReportCommandOptions) {
   const projectId = resolveProjectId(opts.projectId);
 
   // readProjectConfig throws if data/<id>/project.json is missing — that's
@@ -185,6 +210,16 @@ export async function reportCommand(opts: { projectId?: string; runId?: string }
     jsonPath,
     mdPath,
   });
+
+  if (opts.open) {
+    if (openMarkdownReport(path.resolve(mdPath))) {
+      console.log(`${DIM}Opened ${mdPath}${RESET}`);
+    } else {
+      console.warn(
+        `${YELLOW}Could not open the markdown report automatically. Open it manually: ${mdPath}${RESET}`,
+      );
+    }
+  }
 }
 
 function printStdoutSummary(args: {

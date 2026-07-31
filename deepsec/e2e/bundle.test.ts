@@ -216,6 +216,9 @@ describe("bundle e2e", () => {
     expect(stdout).toContain("--include-attempts");
     expect(stdout).toContain("--stub-model");
     expect(stdout).toContain("--data-root");
+    expect(stdout).toContain("--model-provider");
+    expect(stdout).toContain("--reasoning-effort");
+    expect(stdout).toContain("--all-files");
   });
 
   it("Makefile exposes the explore harness entrypoint and forwards efficiency flags", () => {
@@ -224,6 +227,9 @@ describe("bundle e2e", () => {
       "explore-harness",
       "PROJECT_ID=fixture",
       "TARGET_ROOT=fixtures/vulnerable-app",
+      "MODEL_PROVIDER=codex-app-server",
+      "REASONING_EFFORT=high",
+      "ALL_FILES=1",
       "STUB_MODEL=1",
       "SKIP_SETUP=1",
       "FORCE_SETUP=1",
@@ -235,6 +241,9 @@ describe("bundle e2e", () => {
     expect(status, stderr).toBe(0);
     expect(stdout).toContain('PROJECT_ID="fixture"');
     expect(stdout).toContain('TARGET_ROOT="fixtures/vulnerable-app"');
+    expect(stdout).toContain('MODEL_PROVIDER="codex-app-server"');
+    expect(stdout).toContain('REASONING_EFFORT="high"');
+    expect(stdout).toContain('ALL_FILES="1"');
     expect(stdout).toContain('STUB_MODEL="1"');
     expect(stdout).toContain('SKIP_SETUP="1"');
     expect(stdout).toContain('FORCE_SETUP="1"');

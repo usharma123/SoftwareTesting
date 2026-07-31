@@ -59,7 +59,7 @@ If you feel like the `deepsec` should look at more parts of the code, give it [t
 - [docs/configuration.md](docs/configuration.md) — `deepsec.config.ts` reference
 - [docs/plugins.md](docs/plugins.md) — plugin authoring
 - [docs/models.md](docs/models.md) — model selection, defaults, refusals, future models
-- [docs/explore.md](docs/explore.md) — local gVisor explore harness with OpenRouter
+- [docs/explore.md](docs/explore.md) — local gVisor explore harness with Codex app-server or OpenRouter
 - [docs/vercel-setup.md](docs/vercel-setup.md) — AI Gateway + Vercel Sandbox keys / tokens
 - [docs/architecture.md](docs/architecture.md) — pipeline internals
 - [docs/data-layout.md](docs/data-layout.md) — `data/` schemas (FileRecord, RunMeta, …)

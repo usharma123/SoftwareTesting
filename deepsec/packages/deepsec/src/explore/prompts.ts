@@ -94,9 +94,14 @@ export function exploreInitialPrompt(args: {
   topFiles: RankedFile[];
   maxTurns: number;
 }): string {
-  const top = args.topFiles
+  const visibleQueue = args.topFiles.slice(0, 12);
+  const top = visibleQueue
     .map((r, i) => `${i + 1}. ${r.filePath} score=${r.score} reason=${r.reason}`)
     .join("\n");
+  const queueSummary =
+    args.topFiles.length > visibleQueue.length
+      ? `\n(${args.topFiles.length - visibleQueue.length} additional files are scheduled separately.)`
+      : "";
   return `Project: ${args.projectId}
 Focus file: ${args.focus.filePath}
 Focus score: ${args.focus.score}
@@ -104,7 +109,7 @@ Focus reason: ${args.focus.reason}
 Max turns: ${args.maxTurns}
 
 Ranked focus queue:
-${top}
+${top}${queueSummary}
 
 Start by inspecting the focus file and nearby call sites. Use only commands that work in /workspace/target. For Java/Gradle projects, prefer offline Gradle commands such as ./gradlew --offline test or targeted test tasks.`;
 }

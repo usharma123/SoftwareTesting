@@ -56,17 +56,22 @@ function addExploreOptions(command: Command): Command {
     )
     .option("--runtime <runtime>", "Docker runtime; must be runsc", "runsc")
     .option(
-      "--model <model>",
-      "OpenRouter model for focused exploration",
-      "anthropic/claude-opus-4.8",
+      "--model-provider <provider>",
+      "Model transport: openrouter or codex-app-server (default: openrouter)",
     )
-    .option("--rank-model <model>", "OpenRouter model for file ranking")
+    .option("--model <model>", "Model for focused exploration")
+    .option("--rank-model <model>", "Model for file ranking (default: --model)")
+    .option("--reasoning-effort <effort>", "Codex app-server reasoning effort (default: high)")
     .option("--stub-model", "Use a deterministic local stub model for harness testing")
     .option(
       "--live-model-check",
-      "In explore doctor, spend a tiny OpenRouter request to verify selected model access",
+      "In explore doctor, spend a tiny request to verify selected model access",
     )
     .option("--limit <n>", "Number of ranked files to explore (default: 3)", parseInt)
+    .option(
+      "--all-files",
+      "Explore every production-relevant file; cannot be combined with --limit",
+    )
     .option("--concurrency <n>", "Focused attempts to run in parallel (default: 1)", parseInt)
     .option("--max-turns <n>", "Max model turns per focused attempt (default: 40)", parseInt)
     .option(
@@ -293,7 +298,7 @@ addExploreOptions(
   exploreCmd
     .command("doctor")
     .description(
-      "Check local runsc/image/cache/OpenRouter readiness; add --live-model-check for an API probe",
+      "Check local runsc/image/cache/model readiness; add --live-model-check for a model probe",
     ),
 ).action(exploreDoctorCommand);
 
@@ -475,6 +480,7 @@ exploreCmd
   )
   .option("--no-fail-on-accepted-findings", "Only fail when explore artifacts are invalid")
   .option("--no-report", "Skip run-scoped report generation")
+  .option("--open-report", "Open the generated markdown report (Cursor on macOS)")
   .option("--no-export-json", "Skip run-scoped JSON export")
   .option("--no-export-sarif", "Skip run-scoped SARIF export")
   .option("--no-junit", "Skip JUnit XML output")
@@ -496,6 +502,7 @@ program
     "Project identifier (default: the only project in deepsec.config.ts; required if there are multiple)",
   )
   .option("--run-id <id>", "Filter to a specific run's results")
+  .option("--no-open", "Write the report without opening the markdown file")
   .action(reportCommand);
 
 program

@@ -1,0 +1,53 @@
+{
+  "skill_name": "deepsec-explore-harness",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "/deepsec-explore-harness smoke Prowide Core. Exercise the complete wrapper but do not spend any model tokens.",
+      "expected_output": "Claude resolves the real Prowide path, runs the read-only stub preflight, and proposes or executes a one-file stub harness run with full verification and evidence packaging.",
+      "files": [],
+      "expectations": [
+        "Uses scripts/explore-harness.sh rather than recreating the exploration loop",
+        "Includes --stub-model, --limit 1, --concurrency 1, and --max-turns 4",
+        "Does not add --live-model-check or make a real App Server model request",
+        "Preserves and rechecks the Prowide checkout state"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "/deepsec-explore-harness eighty against lib-testing/prowide-core using the same Codex subscription setup we validated. Use concurrency 3.",
+      "expected_output": "Claude runs the hardened wrapper against Prowide with the requested top-80 scope and Codex App Server defaults, while retaining gVisor and evidence verification.",
+      "files": [],
+      "expectations": [
+        "Uses --limit 80 and does not use --all-files",
+        "Uses codex-app-server, gpt-5.6-sol, high reasoning, and concurrency 3",
+        "Runs the target-root preflight and does not execute target commands directly on the host",
+        "Captures a unique data root and monitors the attached run"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "/deepsec-explore-harness retry run abc123 for prowide-core in /tmp/deepsec-prowide-run. Only redo the failed policy-filtered attempts and refresh the evidence.",
+      "expected_output": "Claude inspects the named run and retries failed or missing attempts through the wrapper using the same data root, without rerunning successful files or evading policy controls.",
+      "files": [],
+      "expectations": [
+        "Uses --retry-run-id abc123 and --data-root /tmp/deepsec-prowide-run",
+        "Does not pass an all-attempt retry option",
+        "Does not switch providers or rewrite prompts to evade the policy filter",
+        "Refreshes status, CI artifacts, manifest, and evidence bundle through the wrapper"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "/deepsec-explore-harness stop the current Prowide run, but do not disturb any other Codex or Docker work.",
+      "expected_output": "Claude interrupts the exact harness session, removes only containers belonging to its exact run id, verifies cleanup, and retains partial artifacts.",
+      "files": [],
+      "expectations": [
+        "Targets the exact harness process and exact run id",
+        "Does not use pkill codex, killall, docker system prune, or broad container deletion",
+        "Verifies no run-specific process or container remains",
+        "Keeps partial artifacts unless deletion was explicitly requested"
+      ]
+    }
+  ]
+}

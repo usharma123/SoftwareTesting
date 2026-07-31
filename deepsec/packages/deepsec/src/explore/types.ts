@@ -5,6 +5,9 @@ export const EXPLORE_IMAGE = "deepsec-explore-java11-gradle:local";
 export const EXPLORE_RUNTIME = "runsc";
 export const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_DEFAULT_MODEL = "anthropic/claude-opus-4.8";
+export const CODEX_APP_SERVER_DEFAULT_MODEL = "gpt-5.6-sol";
+
+export type ExploreModelProvider = "openrouter" | "codex-app-server";
 
 export type ExploreProfile = typeof EXPLORE_PROFILE;
 export type ExploreRuntime = typeof EXPLORE_RUNTIME;
@@ -14,9 +17,12 @@ export interface ExploreOptions {
   root?: string;
   profile?: string;
   runtime?: string;
+  modelProvider?: string;
   model?: string;
   rankModel?: string;
+  reasoningEffort?: string;
   limit?: number;
+  allFiles?: boolean;
   concurrency?: number;
   maxTurns?: number;
   stubModel?: boolean;
@@ -239,6 +245,38 @@ export type ExploreProgressEvent =
       maxTurns: number;
       command: string;
       redacted: boolean;
+    };
+
+/**
+ * Live, in-process stream of explore activity for CLI or other event sinks.
+ * Either a per-attempt agent progress event wrapped with attempt identity, or a
+ * run-level lifecycle marker emitted around inventory, ranking, and scheduling.
+ */
+export type ExploreStreamEvent =
+  | {
+      kind: "progress";
+      attemptIndex: number;
+      focusFile: string;
+      phase: "explore" | "validate";
+      event: ExploreProgressEvent;
+    }
+  | {
+      kind:
+        | "run-start"
+        | "ranking"
+        | "ranking-done"
+        | "attempt-queued"
+        | "attempt-start"
+        | "attempt-finish"
+        | "attempt-fail"
+        | "run-complete";
+      at: string;
+      runId?: string;
+      projectId?: string;
+      attemptIndex?: number;
+      focusFile?: string;
+      detail?: string;
+      outcome?: string;
     };
 
 export interface ExploreAttempt {

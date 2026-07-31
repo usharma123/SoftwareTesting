@@ -1,0 +1,19 @@
+[package]
+name = "deepsec-ui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+async-channel = "2.5"
+gpui = { git = "https://github.com/zed-industries/zed", rev = "969a67fcfbf799e68ab00854028228274be847e8", default-features = false, features = ["font-kit"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "969a67fcfbf799e68ab00854028228274be847e8", features = ["font-kit", "runtime_shaders"] }
+libc = "0.2"
+rfd = "0.15"
+serde_json = "1.0"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true

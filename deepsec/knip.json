@@ -21,7 +21,12 @@
       "entry": ["src/config.ts", "src/sandbox/request-proxy.mjs!", "src/__tests__/**/*.test.ts"]
     }
   },
-  "ignore": ["fixtures/vulnerable-app/**", "samples/**", ".deepsec/**"],
+  "ignore": [
+    "fixtures/vulnerable-app/**",
+    "samples/**",
+    ".deepsec/**",
+    "packages/deepsec/src/__tests__/fixtures/**"
+  ],
   "ignoreIssues": {
     "packages/deepsec/src/commands/explore.ts": ["exports", "types"],
     "packages/deepsec/src/explore/**": ["exports", "types"]

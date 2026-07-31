@@ -47,6 +47,18 @@ await build({
 });
 chmodSync(resolve(distDir, "cli.mjs"), 0o755);
 
+// The native GPUI companion only needs the explore command family. Keeping
+// this entrypoint focused lets esbuild produce a self-contained sidecar
+// without shipping the unrelated agent and cloud SDK dependency graph.
+await build({
+  ...common,
+  external: [],
+  entryPoints: [resolve(__dirname, "src/explore-ui-cli.ts")],
+  outfile: resolve(distDir, "explore-ui-cli.mjs"),
+  banner: { js: `#!/usr/bin/env node\n${requireShim}` },
+});
+chmodSync(resolve(distDir, "explore-ui-cli.mjs"), 0o755);
+
 await build({
   ...common,
   entryPoints: [resolve(__dirname, "src/config.ts")],
@@ -94,6 +106,7 @@ cpSync(resolve(repoRoot, "NOTICE"), resolve(__dirname, "NOTICE"));
 
 console.log("\nBundle complete:");
 console.log("  dist/cli.mjs");
+console.log("  dist/explore-ui-cli.mjs");
 console.log("  dist/config.mjs");
 console.log("  dist/sandbox/request-proxy.mjs");
 console.log("  dist/docs/");

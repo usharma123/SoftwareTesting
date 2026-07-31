@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { ensureProject, reportJsonPath, reportMdPath, writeFileRecord } from "@deepsec/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { reportCommand } from "../commands/report.js";
+import { openMarkdownReport, reportCommand } from "../commands/report.js";
 
 let cleanup: (() => void) | null = null;
 const originalDataRoot = process.env.DEEPSEC_DATA_ROOT;
@@ -31,6 +31,17 @@ function setupProject(): { projectId: string; runId: string } {
 }
 
 describe("reportCommand()", () => {
+  it("opens macOS reports in Cursor without a shell", () => {
+    const run = vi.fn().mockReturnValue({ status: 0 });
+
+    expect(openMarkdownReport("/tmp/report with spaces.md", "darwin", run)).toBe(true);
+    expect(run).toHaveBeenCalledWith(
+      "open",
+      ["-a", "Cursor", "/tmp/report with spaces.md"],
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+  });
+
   it("includes low-severity findings in run-scoped report totals and markdown", async () => {
     const { projectId, runId } = setupProject();
     vi.spyOn(console, "log").mockImplementation(() => {});

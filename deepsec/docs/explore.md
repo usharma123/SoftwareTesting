@@ -17,9 +17,18 @@ Existing `scan`, `process`, and `revalidate` behavior is unchanged.
 - Local image `ubuntu:22.04`.
 - Local image `deepsec-explore-java11-gradle:local`, built by setup.
 - A host Gradle cache with `~/.gradle/caches/modules-2` and `~/.gradle/wrapper/dists`.
-- `OPENROUTER_API_KEY` for direct OpenRouter Responses API calls.
+- A local `codex` login for the Codex app-server backend, or
+  `OPENROUTER_API_KEY` for direct OpenRouter Responses API calls.
 
-`explore` does not use Vercel AI Gateway. Set `OPENROUTER_BASE_URL` only when using an OpenRouter-compatible endpoint; it defaults to `https://openrouter.ai/api/v1`.
+The contributor harness defaults to `--model-provider codex-app-server`, using
+the local Codex subscription without exposing the target tree to app-server.
+App-server runs with tools disabled in an empty read-only workspace; DeepSec
+parses its structured actions and executes approved commands only through the
+gVisor container runner. The direct `deepsec explore` CLI remains backward
+compatible and defaults to `--model-provider openrouter`.
+
+`explore` does not use Vercel AI Gateway. Set `OPENROUTER_BASE_URL` only when
+using the OpenRouter backend; it defaults to `https://openrouter.ai/api/v1`.
 
 Useful OpenRouter knobs:
 
@@ -31,7 +40,10 @@ export OPENROUTER_TIMEOUT_MS=240000
 
 For expensive models such as `anthropic/claude-opus-4.8`, reduce `OPENROUTER_MAX_OUTPUT_TOKENS` if OpenRouter reports credit reservation failures.
 
-DeepSec asks OpenRouter for structured JSON responses: strict JSON Schema for file ranking and JSON-object mode for focused agent/validation turns. If a provider rejects `response_format`, DeepSec retries that request without it and relies on the canonical JSON prompt plus local parser validation/repair.
+DeepSec asks both backends for structured JSON responses: strict JSON Schema
+for file ranking and canonical JSON actions for focused agent/validation turns.
+If OpenRouter rejects `response_format`, DeepSec retries without it and relies
+on the canonical JSON prompt plus local parser validation/repair.
 
 ## Contributor Harness Script
 
@@ -45,15 +57,40 @@ TARGET_ROOT=../lib-testing/prowide-core \
   ./scripts/explore-harness.sh
 ```
 
+For the `prowide-core` checkout in this workspace, the ready-to-run launcher is:
+
+```sh
+./scripts/run-prowide-core-explore.sh
+```
+
+It uses the `codex-app-server` shortcut and therefore reuses the local `codex`
+login instead of requiring a separate model API key. Extra harness options can
+be appended normally, for example `--all-files` or `--limit 10`.
+
 The same flow is available through Make:
 
 ```sh
 make explore-harness PROJECT_ID=prowide-core TARGET_ROOT=../lib-testing/prowide-core
 ```
 
+### macOS visual companion
+
+`apps/deepsec-ui` is a GPUI-based launcher and live run observer for the same
+harness. It shows setup, preflight, ranking, isolated attempts, verification,
+and evidence packaging without changing the script used by CI:
+
+```bash
+make deepsec-ui
+```
+
+Simulation mode is selected by default and uses the deterministic stub model.
+Choose a target repository in the app before starting. See
+`apps/deepsec-ui/README.md` for packaging, event-protocol, and performance
+details.
+
 Run these commands from the `deepsec/` repo root so `.env.local` or `.env`
 is loaded by the CLI. Use `STUB_MODEL=1` or `--stub-model` to test the harness
-without OpenRouter model calls. The script reuses an existing local explore
+without model calls. The script reuses an existing local explore
 image by default; pass `FORCE_SETUP=1` or `--force-setup` when you need to
 rebuild it.
 
@@ -69,10 +106,19 @@ is missing, it falls back to `pnpm deepsec`, so fresh checkouts should run
 `corepack enable`, `pnpm install`, and `pnpm bundle` first. This repo expects
 Node 22 or newer and `pnpm@8.15.9`.
 
+On macOS the script adds the standard Homebrew and Docker Desktop binary
+directories to `PATH`. This keeps launches from Finder, Shortcuts, and
+minimal-shell environments from failing with `spawn docker ENOENT`.
+
 By default, the wrapper writes CI artifacts without failing on accepted
 findings. Use `FAIL_ON_ACCEPTED_FINDINGS=1` with Make or `--fail-on-findings`
 with the script when the harness run should fail on validated findings at or
 above `MIN_SEVERITY`.
+
+The wrapper opens the generated run-scoped Markdown report in Cursor on macOS
+(and the platform opener elsewhere). Pass `--no-open-report` or set
+`OPEN_REPORT=0` for headless runs. A direct `deepsec report` command behaves
+the same way; pass `--no-open` to only write the files.
 
 ## Setup
 
@@ -98,7 +144,7 @@ pnpm deepsec explore doctor \
 
 With `--root`, doctor creates a throwaway gVisor container, verifies Docker reports `runtime=runsc` and `network=none`, copies the target tree into an isolated temp directory, mounts a seeded per-run Gradle cache, and runs the offline Gradle preflight.
 
-To verify the selected OpenRouter model before a long run, opt into a tiny paid API probe:
+To verify the selected Codex app-server model before a long run, opt into a tiny model probe:
 
 ```sh
 pnpm deepsec explore doctor \
@@ -106,8 +152,9 @@ pnpm deepsec explore doctor \
   --root ../lib-testing/prowide-core \
   --profile java11-gradle \
   --runtime runsc \
-  --model anthropic/claude-opus-4.8 \
-  --rank-model anthropic/claude-opus-4.8 \
+  --model-provider codex-app-server \
+  --model gpt-5.6-sol \
+  --reasoning-effort high \
   --live-model-check
 ```
 
@@ -115,7 +162,7 @@ The live model check sends a 256-output-token JSON reachability request to each 
 
 ## Stub Harness Test
 
-To test the full local harness without OpenRouter credits, add `--stub-model`:
+To test the full local harness without model usage, add `--stub-model`:
 
 ```sh
 DEEPSEC_DATA_ROOT=/tmp/deepsec-explore-stub \
@@ -143,14 +190,19 @@ pnpm deepsec explore \
   --root ../lib-testing/prowide-core \
   --profile java11-gradle \
   --runtime runsc \
-  --model anthropic/claude-opus-4.8 \
-  --rank-model anthropic/claude-opus-4.8 \
-  --max-tokens 200000 \
-  --max-cost-usd 25 \
-  --limit 3 \
+  --model-provider codex-app-server \
+  --model gpt-5.6-sol \
+  --reasoning-effort high \
+  --all-files \
   --concurrency 1 \
   --max-turns 40
 ```
+
+`--all-files` removes the normal 80-candidate inventory ceiling and schedules
+one focused attempt for every production-relevant source/configuration file.
+Ranking is performed in bounded batches so the inventory does not overflow one
+model context. Test, fixture, generated, dependency, and build-output paths are
+available to focused attempts when relevant but are not scheduled separately.
 
 Every focused attempt starts a fresh container with:
 
@@ -176,7 +228,11 @@ Ranking previews, model-requested command strings, and command outputs are redac
 
 Each completed run writes `integrity-manifest.json` with SHA-256 hashes for the run artifacts. `deepsec explore status` verifies that manifest and reports missing, changed, or unexpected artifacts.
 
-For long Opus runs, pass `--max-tokens <n>` and/or `--max-cost-usd <n>`. Provider usage is only known after a response returns, so these caps stop the next model request after reported usage reaches the limit. The current attempt records budget exhaustion as an `attempt-error.json` failure and the run artifacts remain inspectable.
+For long runs, pass `--max-tokens <n>` and/or `--max-cost-usd <n>`.
+App-server reports token usage but not dollar cost, so `--max-cost-usd` only
+applies to providers that report cost. Caps stop the next model request after
+reported usage reaches the limit. The current attempt records budget exhaustion
+as an `attempt-error.json` failure and the run artifacts remain inspectable.
 
 ## Report and Export
 
@@ -245,7 +301,7 @@ for automation, and `--limit <n>` to cap output. Each entry includes status,
 attempt counts, accepted findings, token/cost totals when present, and any
 artifact problems found by the same validator used by `explore status`.
 
-`explore status` verifies the run artifacts themselves: metadata consistency, ranking container runtime/network/hardening, ranking score validity, attempt count, per-attempt runtime/network/hardening, validation-container runtime/network/hardening for bug reports, source-copy exclusion counts, workspace-change capture, event logs, final outcomes, accepted finding title/severity/slug summaries, summary counters, integrity hashes, provider-reported usage totals, and consistency between ranking, attempt, and total usage buckets. Add `--json` for machine-readable CI output. Add `--fail-on-accepted-findings` to exit `2` when artifact checks pass but validated accepted findings are present. Pair it with `--min-severity <sev>` to fail only for accepted findings at or above that threshold. Artifact problems still exit `1`. `summary.json` stores ranking, attempt, and total usage buckets when OpenRouter returns token/cost metadata.
+`explore status` verifies the run artifacts themselves: metadata consistency, ranking container runtime/network/hardening, ranking score validity, attempt count, per-attempt runtime/network/hardening, validation-container runtime/network/hardening for bug reports, source-copy exclusion counts, workspace-change capture, event logs, final outcomes, accepted finding title/severity/slug summaries, summary counters, integrity hashes, provider-reported usage totals, and consistency between ranking, attempt, and total usage buckets. Add `--json` for machine-readable CI output. Add `--fail-on-accepted-findings` to exit `2` when artifact checks pass but validated accepted findings are present. Pair it with `--min-severity <sev>` to fail only for accepted findings at or above that threshold. Artifact problems still exit `1`. `summary.json` stores ranking, attempt, and total usage buckets when the selected backend returns usage metadata.
 
 `explore attempt <attempt>` inspects one focused attempt by index (`1`) or
 directory name (`01`). The human view shows the report, validation verdict,

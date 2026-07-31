@@ -1,13 +1,19 @@
-.PHONY: explore-harness
+.PHONY: explore-harness deepsec-ui
+
+deepsec-ui:
+	cargo run --manifest-path apps/deepsec-ui/Cargo.toml
 
 explore-harness:
 	PROJECT_ID="$(PROJECT_ID)" \
 	TARGET_ROOT="$(TARGET_ROOT)" \
 	PROFILE="$(PROFILE)" \
 	RUNTIME="$(RUNTIME)" \
+	MODEL_PROVIDER="$(MODEL_PROVIDER)" \
 	MODEL="$(MODEL)" \
 	RANK_MODEL="$(RANK_MODEL)" \
+	REASONING_EFFORT="$(REASONING_EFFORT)" \
 	LIMIT="$(LIMIT)" \
+	ALL_FILES="$(ALL_FILES)" \
 	CONCURRENCY="$(CONCURRENCY)" \
 	MAX_TURNS="$(MAX_TURNS)" \
 	MAX_TOKENS="$(MAX_TOKENS)" \

@@ -33,7 +33,7 @@ import {
 } from "../explore/command-policy.js";
 import { shouldCopyProjectPath, validateContainerInspectRuntime } from "../explore/docker.js";
 import { writeExploreIntegrityManifest } from "../explore/integrity.js";
-import { checkOpenRouterModelReachability } from "../explore/model-check.js";
+import { checkModelReachability } from "../explore/model-check.js";
 import { OpenRouterResponsesClient } from "../explore/openrouter.js";
 import {
   exploreRepairPrompt,
@@ -198,6 +198,17 @@ describe("explore ranking", () => {
       "\x1esrc/main/java/A.java\n10\nclass A {}\x1f\n\x1esrc/generated/java/B.java\n10\nclass B {}\x1f\n",
     );
     expect(parsed.map((f) => f.filePath)).toEqual(["src/main/java/A.java"]);
+  });
+
+  it("can retain the full production inventory when an explicit large limit is requested", () => {
+    const inventory = Array.from(
+      { length: 125 },
+      (_, index) =>
+        `\x1esrc/main/java/File${String(index).padStart(3, "0")}.java\n10\nclass File${index} {}\x1f\n`,
+    ).join("");
+
+    expect(parseContainerFileSummaries(inventory)).toHaveLength(80);
+    expect(parseContainerFileSummaries(inventory, Number.MAX_SAFE_INTEGER)).toHaveLength(125);
   });
 
   it("redacts secret-looking values from ranking previews", () => {
@@ -371,7 +382,7 @@ describe("explore OpenRouter client", () => {
       10_000,
       256,
     );
-    const usage = await checkOpenRouterModelReachability({
+    const usage = await checkModelReachability({
       client,
       model: "anthropic/claude-opus-4.8",
     });
@@ -390,7 +401,7 @@ describe("explore OpenRouter client", () => {
     };
 
     await expect(
-      checkOpenRouterModelReachability({ client, model: "anthropic/claude-opus-4.8" }),
+      checkModelReachability({ client, model: "anthropic/claude-opus-4.8" }),
     ).rejects.toThrow(/unexpected response/);
   });
 

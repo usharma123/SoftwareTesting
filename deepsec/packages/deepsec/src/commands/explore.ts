@@ -15,14 +15,16 @@ import {
 } from "@deepsec/core";
 import { runAgenticExploreLoop, validateBugReport } from "../explore/agent-loop.js";
 import { maybeBudgetModelClient } from "../explore/budget.js";
+import { CodexAppServerClient } from "../explore/codex-app-server.js";
 import {
   assertExploreImageExists,
   assertGradleCacheAvailable,
   assertRunscRegistered,
   createGvisorContainer,
 } from "../explore/docker.js";
+import { createProcessExploreEventSink } from "../explore/event-stream.js";
 import { writeExploreIntegrityManifest } from "../explore/integrity.js";
-import { checkOpenRouterModelReachability } from "../explore/model-check.js";
+import { checkModelReachability } from "../explore/model-check.js";
 import { OpenRouterResponsesClient } from "../explore/openrouter.js";
 import { rankingPrompt } from "../explore/prompts.js";
 import {
@@ -41,13 +43,16 @@ import {
 } from "../explore/status.js";
 import { StubExploreModelClient } from "../explore/stub-model.js";
 import {
+  CODEX_APP_SERVER_DEFAULT_MODEL,
   EXPLORE_IMAGE,
   EXPLORE_RUNTIME,
   type ExploreAttempt,
   type ExploreAttemptFailure,
+  type ExploreModelProvider,
   type ExploreOptions,
   type ExploreProgressEvent,
   type ExploreSetupOptions,
+  type ExploreStreamEvent,
   type ModelClient,
   type ModelUsage,
   OPENROUTER_DEFAULT_MODEL,
@@ -75,6 +80,7 @@ export interface ExploreStatusOptions {
 export interface ExploreCiOptions extends ExploreStatusOptions {
   outDir?: string;
   report?: boolean;
+  openReport?: boolean;
   exportJson?: boolean;
   exportSarif?: boolean;
   junit?: boolean;
@@ -166,7 +172,7 @@ interface ExploreSummary {
   usage?: ModelUsage;
 }
 
-interface ExploreCiOutputs {
+export interface ExploreCiOutputs {
   outDir: string;
   summaryJson: string;
   reportJson?: string;
@@ -176,7 +182,7 @@ interface ExploreCiOutputs {
   junitXml?: string;
 }
 
-interface ExploreCiSummary {
+export interface ExploreCiSummary {
   version: 1;
   generatedAt: string;
   projectId: string;
@@ -209,7 +215,7 @@ interface ExploreCiSummary {
 
 const EXPLORE_CI_SUMMARY_FILE = "ci-summary.json";
 
-interface ExploreCiFindingSummary {
+export interface ExploreCiFindingSummary {
   attemptDir: string;
   focusFile?: string;
   title?: string;
@@ -221,7 +227,7 @@ interface ExploreCiFindingSummary {
   thresholdMatched: boolean;
 }
 
-interface ExploreCiArtifactSummary {
+export interface ExploreCiArtifactSummary {
   kind: "report-json" | "report-markdown" | "findings-json" | "findings-sarif" | "junit-xml";
   path: string;
   exists: boolean;
@@ -229,7 +235,7 @@ interface ExploreCiArtifactSummary {
   sha256?: string;
 }
 
-interface ExploreArtifactEntry {
+export interface ExploreArtifactEntry {
   kind: string;
   path: string;
   exists: boolean;
@@ -237,14 +243,14 @@ interface ExploreArtifactEntry {
   sha256?: string;
 }
 
-interface ExploreAttemptArtifactIndex {
+export interface ExploreAttemptArtifactIndex {
   dirName: string;
   focusFile?: string;
   dir: string;
   artifacts: ExploreArtifactEntry[];
 }
 
-interface ExploreArtifactIndex {
+export interface ExploreArtifactIndex {
   version: 1;
   generatedAt: string;
   projectId: string;
@@ -258,7 +264,7 @@ interface ExploreArtifactIndex {
   ciArtifacts: ExploreArtifactEntry[];
 }
 
-interface ExploreRunListEntry {
+export interface ExploreRunListEntry {
   projectId: string;
   runId: string;
   exploreDir: string;
@@ -277,7 +283,7 @@ interface ExploreRunListEntry {
   completedAt?: string;
 }
 
-interface ExploreRunList {
+export interface ExploreRunList {
   version: 1;
   generatedAt: string;
   projectId: string;
@@ -285,7 +291,7 @@ interface ExploreRunList {
   runs: ExploreRunListEntry[];
 }
 
-interface ExploreAttemptInspection {
+export interface ExploreAttemptInspection {
   version: 1;
   generatedAt: string;
   projectId: string;
@@ -303,7 +309,7 @@ interface ExploreAttemptInspection {
   problems: string[];
 }
 
-interface ExploreFindingEntry {
+export interface ExploreFindingEntry {
   attempt: string;
   focusFile?: string;
   accepted: boolean;
@@ -316,7 +322,7 @@ interface ExploreFindingEntry {
   thresholdMatched: boolean;
 }
 
-interface ExploreFindingsSummary {
+export interface ExploreFindingsSummary {
   version: 1;
   generatedAt: string;
   projectId: string;
@@ -333,9 +339,9 @@ interface ExploreFindingsSummary {
   findings: ExploreFindingEntry[];
 }
 
-type ExploreAuditCheckStatus = "pass" | "warn" | "fail";
+export type ExploreAuditCheckStatus = "pass" | "warn" | "fail";
 
-interface ExploreAuditCheck {
+export interface ExploreAuditCheck {
   id: string;
   label: string;
   status: ExploreAuditCheckStatus;
@@ -343,7 +349,7 @@ interface ExploreAuditCheck {
   problems: string[];
 }
 
-interface ExploreAuditSummary {
+export interface ExploreAuditSummary {
   version: 1;
   generatedAt: string;
   projectId: string;
@@ -548,6 +554,7 @@ export async function exploreSetupCommand(rawOpts: ExploreSetupOptions): Promise
 
 export async function exploreDoctorCommand(rawOpts: ExploreOptions): Promise<void> {
   const opts = normalizeCommandOptions(rawOpts);
+  assertExploreSelectionOptions(opts);
   const profile = assertExploreProfile(opts.profile);
   const runtime = opts.runtime ?? EXPLORE_RUNTIME;
   if (runtime !== EXPLORE_RUNTIME) {
@@ -561,8 +568,28 @@ export async function exploreDoctorCommand(rawOpts: ExploreOptions): Promise<voi
   await check("Docker runtime registered", () => assertRunscRegistered(runtime));
   await check("Explore image exists", () => assertExploreImageExists(EXPLORE_IMAGE));
   await check("Gradle offline cache exists", () => assertGradleCacheAvailable());
-  if (opts.stubModel) {
-    console.log(`  ${GREEN}ok${RESET} Stub model selected; OpenRouter is not required`);
+  const modelConfig = resolveExploreModelConfig(opts);
+  if (modelConfig.stubModel) {
+    console.log(`  ${GREEN}ok${RESET} Stub model selected; external model access is not required`);
+  } else if (modelConfig.provider === "codex-app-server") {
+    const client = new CodexAppServerClient({ reasoningEffort: modelConfig.reasoningEffort });
+    await check(`Codex app-server model available (${modelConfig.model})`, () =>
+      client.assertModelAvailable(modelConfig.model),
+    );
+    if (opts.liveModelCheck) {
+      const models = [...new Set([modelConfig.rankModel, modelConfig.model])];
+      for (const modelName of models) {
+        const usage = await check(`Codex app-server live model check (${modelName})`, () =>
+          checkModelReachability({ client, model: modelName }),
+        );
+        const formatted = formatModelUsage(usage);
+        if (formatted) console.log(`    usage: ${formatted}`);
+      }
+    } else {
+      console.log(
+        "  Codex app-server live model check: skipped (pass --live-model-check to spend tokens)",
+      );
+    }
   } else {
     await check("OpenRouter API key configured", () => {
       if (!process.env.OPENROUTER_API_KEY) {
@@ -570,9 +597,7 @@ export async function exploreDoctorCommand(rawOpts: ExploreOptions): Promise<voi
       }
     });
     if (opts.liveModelCheck) {
-      const model = opts.model ?? OPENROUTER_DEFAULT_MODEL;
-      const rankModel = opts.rankModel ?? model;
-      const models = [...new Set([rankModel, model])];
+      const models = [...new Set([modelConfig.rankModel, modelConfig.model])];
       const client = new OpenRouterResponsesClient(
         process.env.OPENROUTER_API_KEY,
         process.env.OPENROUTER_BASE_URL,
@@ -581,7 +606,7 @@ export async function exploreDoctorCommand(rawOpts: ExploreOptions): Promise<voi
       );
       for (const modelName of models) {
         const usage = await check(`OpenRouter live model check (${modelName})`, () =>
-          checkOpenRouterModelReachability({ client, model: modelName }),
+          checkModelReachability({ client, model: modelName }),
         );
         const formatted = formatModelUsage(usage);
         if (formatted) console.log(`    usage: ${formatted}`);
@@ -608,7 +633,10 @@ export async function exploreDoctorCommand(rawOpts: ExploreOptions): Promise<voi
       try {
         console.log(`    container runtime: ${container.metadata.runtime}`);
         console.log(`    container network: ${container.metadata.networkMode}`);
-        files = await collectProductionFileSummariesFromRunner(container);
+        files = await collectProductionFileSummariesFromRunner(
+          container,
+          opts.allFiles ? Number.MAX_SAFE_INTEGER : undefined,
+        );
         if (files.length === 0) {
           throw new Error(`No production-relevant files found under ${root}.`);
         }
@@ -1193,7 +1221,7 @@ export async function exploreCiCommand(rawOpts: ExploreCiOptions): Promise<void>
   if (shouldReport) {
     console.log();
     console.log(`${BOLD}Generating run-scoped report${RESET}`);
-    await reportCommand({ projectId, runId });
+    await reportCommand({ projectId, runId, open: opts.openReport === true });
   }
 
   if (shouldExportJson) {
@@ -1347,7 +1375,7 @@ function summarizeCiArtifacts(outputs: ExploreCiOutputs): ExploreCiArtifactSumma
   return artifacts;
 }
 
-function buildExploreArtifactIndex(
+export function buildExploreArtifactIndex(
   status: ExploreRunStatus,
   opts: { hashes: boolean },
 ): ExploreArtifactIndex {
@@ -1400,7 +1428,7 @@ function buildExploreArtifactIndex(
   };
 }
 
-function buildExploreRunList(projectId: string, limit: number): ExploreRunList {
+export function buildExploreRunList(projectId: string, limit: number): ExploreRunList {
   const exploreRoot = path.join(dataDir(projectId), "explore");
   const runIds = fs.existsSync(exploreRoot)
     ? fs
@@ -1474,7 +1502,7 @@ function summarizeExploreRunForList(
   }
 }
 
-function buildExploreAttemptInspection(
+export function buildExploreAttemptInspection(
   status: ExploreRunStatus,
   requestedAttempt: string,
   opts: { includeTranscript: boolean },
@@ -1535,7 +1563,7 @@ function normalizeAttemptDirName(value: string): string {
   return trimmed;
 }
 
-function buildExploreFindingsSummary(
+export function buildExploreFindingsSummary(
   status: ExploreRunStatus,
   opts: { minSeverity?: Severity; acceptedOnly: boolean },
 ): ExploreFindingsSummary {
@@ -1585,7 +1613,7 @@ function buildExploreFindingsSummary(
   };
 }
 
-function buildExploreAuditSummary(
+export function buildExploreAuditSummary(
   status: ExploreRunStatus,
   opts: {
     failOnAcceptedFindings: boolean;
@@ -1741,7 +1769,7 @@ function buildExploreAuditSummary(
   };
 }
 
-function buildExploreRunManifest(
+export function buildExploreRunManifest(
   status: ExploreRunStatus,
   opts: {
     failOnAcceptedFindings: boolean;
@@ -2751,8 +2779,25 @@ export function countAcceptedExploreFindings(
   ).length;
 }
 
+export interface ExploreRunHooks {
+  onEvent?: (event: ExploreStreamEvent) => void;
+}
+
 export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
+  const eventSink = createProcessExploreEventSink();
+  await runExplore(rawOpts, eventSink ? { onEvent: eventSink } : undefined);
+}
+
+export async function runExplore(rawOpts: ExploreOptions, hooks?: ExploreRunHooks): Promise<void> {
+  const emit = (event: ExploreStreamEvent): void => {
+    try {
+      hooks?.onEvent?.(event);
+    } catch {
+      // A misbehaving UI sink must never break an explore run.
+    }
+  };
   const opts = normalizeCommandOptions(rawOpts);
+  assertExploreSelectionOptions(opts);
   const profile = assertExploreProfile(opts.profile);
   const runtime = opts.runtime ?? EXPLORE_RUNTIME;
   if (runtime !== EXPLORE_RUNTIME) {
@@ -2761,14 +2806,13 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
     );
   }
 
-  const limit = parsePositiveInt(opts.limit, 3, "--limit");
+  const requestedLimit = opts.allFiles ? undefined : parsePositiveInt(opts.limit, 3, "--limit");
   const concurrency = parsePositiveInt(opts.concurrency, 1, "--concurrency");
   const maxTurns = parsePositiveInt(opts.maxTurns, 40, "--max-turns");
   const maxTokens = parseOptionalPositiveInt(opts.maxTokens, "--max-tokens");
   const maxCostUsd = parseOptionalPositiveNumber(opts.maxCostUsd, "--max-cost-usd");
-  const stubModel = opts.stubModel === true;
-  const model = stubModel ? "stub-explore" : (opts.model ?? OPENROUTER_DEFAULT_MODEL);
-  const rankModel = stubModel ? "stub-explore" : (opts.rankModel ?? model);
+  const modelConfig = resolveExploreModelConfig(opts);
+  const { model, rankModel, stubModel } = modelConfig;
   const resolved = resolveProjectIdForDirect(opts.projectId, opts.root);
   const root = path.resolve(resolved.rootPath);
   ensureProject(resolved.projectId, root);
@@ -2776,7 +2820,7 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
   const runId = generateRunId();
   const exploreDir = path.join(dataDir(resolved.projectId), "explore", runId);
   fs.mkdirSync(path.join(exploreDir, "attempts"), { recursive: true });
-  writeJson(path.join(exploreDir, "metadata.json"), {
+  const metadata: Record<string, unknown> = {
     projectId: resolved.projectId,
     runId,
     root,
@@ -2785,23 +2829,40 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
     image: EXPLORE_IMAGE,
     model,
     rankModel,
+    modelProvider: stubModel ? "stub" : modelConfig.provider,
+    reasoningEffort: modelConfig.reasoningEffort,
     stubModel,
-    limit,
+    allFiles: opts.allFiles === true,
+    limit: requestedLimit ?? null,
     concurrency,
     maxTurns,
     maxTokens,
     maxCostUsd,
     integrityManifest: true,
     startedAt: new Date().toISOString(),
-  });
+  };
+  writeJson(path.join(exploreDir, "metadata.json"), metadata);
 
   console.log(`DeepSec explore run ${runId}`);
   console.log(`  project: ${resolved.projectId}`);
   console.log(`  root:    ${root}`);
   console.log(`  model:   ${model}`);
+  console.log(`  provider: ${stubModel ? "stub" : modelConfig.provider}`);
   console.log(`  runtime: ${runtime}`);
+  emit({
+    kind: "run-start",
+    at: new Date().toISOString(),
+    runId,
+    projectId: resolved.projectId,
+    detail: `run ${runId} · ${resolved.projectId} · ${model}`,
+  });
 
   console.log("Collecting production file inventory inside gVisor...");
+  emit({
+    kind: "ranking",
+    at: new Date().toISOString(),
+    detail: "collecting production file inventory",
+  });
   const inventoryContainer = await createGvisorContainer({
     root,
     runId: `${runId}-rank`,
@@ -2812,34 +2873,42 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
   let files: SourceFileSummary[] = [];
   try {
     writeJson(path.join(exploreDir, "ranking-container.json"), inventoryContainer.metadata);
-    files = await collectProductionFileSummariesFromRunner(inventoryContainer);
+    files = await collectProductionFileSummariesFromRunner(
+      inventoryContainer,
+      opts.allFiles ? Number.MAX_SAFE_INTEGER : undefined,
+    );
   } finally {
     await inventoryContainer.cleanup();
   }
   if (files.length === 0) {
     throw new Error(`No production-relevant files found under ${root}.`);
   }
+  const limit = opts.allFiles ? files.length : requestedLimit!;
   if (files.length < limit) {
     throw new Error(
       `Only ${files.length} production-relevant files found; cannot run --limit ${limit}.`,
     );
   }
+  metadata.limit = limit;
+  metadata.candidateFiles = files.length;
+  writeJson(path.join(exploreDir, "metadata.json"), metadata);
 
-  const client = maybeBudgetModelClient(
-    stubModel ? new StubExploreModelClient() : new OpenRouterResponsesClient(),
-    { maxTokens, maxCostUsd },
-  );
-  console.log(`Ranking ${files.length} files with ${rankModel}...`);
-  const rankingResponse = await client.complete({
-    model: rankModel,
-    temperature: 0.1,
-    responseFormat: RANKING_RESPONSE_FORMAT,
-    messages: [
-      { role: "system", content: "You rank source files for local security exploration." },
-      { role: "user", content: rankingPrompt(files) },
-    ],
+  const client = createExploreModelClient(modelConfig, { maxTokens, maxCostUsd });
+  console.log(`Ranking ${files.length} files with ${rankModel} in bounded batches...`);
+  emit({
+    kind: "ranking",
+    at: new Date().toISOString(),
+    detail: `ranking ${files.length} files with ${rankModel} in bounded batches`,
   });
-  const rankings = normalizeRankings(files, parseRankingsFromText(rankingResponse.text));
+  const rankingResult = await rankProductionFiles({
+    client,
+    files,
+    model: rankModel,
+    onBatch: (batch, total) => {
+      console.log(`  ranking batch ${batch}/${total}`);
+    },
+  });
+  const rankings = rankingResult.rankings;
   const storedRankings: StoredRankings = {
     projectId: resolved.projectId,
     runId,
@@ -2847,13 +2916,25 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
     model: rankModel,
     rankings,
   };
-  if (rankingResponse.usage) storedRankings.usage = rankingResponse.usage;
+  if (rankingResult.usage) storedRankings.usage = rankingResult.usage;
   writeJson(path.join(exploreDir, "rankings.json"), storedRankings);
 
   const selected = selectTopRankedFiles(rankings, limit);
   console.log(`Selected ${selected.length} focused attempts:`);
+  emit({
+    kind: "ranking-done",
+    at: new Date().toISOString(),
+    detail: `selected ${selected.length} focused attempts`,
+  });
   for (const [i, ranked] of selected.entries()) {
     console.log(`  ${i + 1}. [${ranked.score}] ${ranked.filePath}`);
+    emit({
+      kind: "attempt-queued",
+      at: new Date().toISOString(),
+      attemptIndex: i,
+      focusFile: ranked.filePath,
+      detail: `score ${ranked.score}`,
+    });
   }
 
   const attemptResults = await mapLimit(selected, concurrency, async (focus, index) => {
@@ -2867,6 +2948,8 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
       maxTurns,
       attemptDir: path.join(exploreDir, "attempts", `${String(index + 1).padStart(2, "0")}`),
       client,
+      attemptIndex: index,
+      onEvent: emit,
     });
   });
   const attempts = attemptResults
@@ -2882,7 +2965,7 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
     runId,
     model,
     exploreDir,
-    rankingUsage: rankingResponse.usage,
+    rankingUsage: rankingResult.usage,
     attemptsForMerge: attempts,
   });
   writeExploreIntegrityManifest(exploreDir);
@@ -2896,6 +2979,15 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
   console.log(`  accepted findings: ${summary.acceptedFindings}`);
   const usageText = formatModelUsage(summary.usage);
   if (usageText) console.log(`  usage:             ${usageText}`);
+  emit({
+    kind: "run-complete",
+    at: new Date().toISOString(),
+    runId,
+    projectId: resolved.projectId,
+    detail: `${attempts.length} completed · ${failures.length} failed · ${summary.acceptedFindings} accepted${
+      usageText ? ` · ${usageText}` : ""
+    }`,
+  });
   if (failures.length > 0) {
     console.log(
       `${YELLOW}One or more focused attempts failed; inspect explore status for details.${RESET}`,
@@ -2908,7 +3000,23 @@ export async function exploreCommand(rawOpts: ExploreOptions): Promise<void> {
 }
 
 export async function exploreRetryCommand(rawOpts: ExploreRetryOptions): Promise<void> {
+  const eventSink = createProcessExploreEventSink();
+  await runExploreRetry(rawOpts, eventSink ? { onEvent: eventSink } : undefined);
+}
+
+export async function runExploreRetry(
+  rawOpts: ExploreRetryOptions,
+  hooks?: ExploreRunHooks,
+): Promise<void> {
+  const emit = (event: ExploreStreamEvent): void => {
+    try {
+      hooks?.onEvent?.(event);
+    } catch {
+      // A misbehaving UI sink must never break an explore retry.
+    }
+  };
   const opts = normalizeCommandOptions(rawOpts);
+  assertExploreSelectionOptions(opts);
   assertExploreProfile(opts.profile);
   const runtime = opts.runtime ?? EXPLORE_RUNTIME;
   if (runtime !== EXPLORE_RUNTIME) {
@@ -2931,11 +3039,13 @@ export async function exploreRetryCommand(rawOpts: ExploreRetryOptions): Promise
   }
 
   const root = path.resolve(opts.root ?? (typeof metadata.root === "string" ? metadata.root : "."));
-  const limit = parsePositiveInt(
-    opts.limit,
-    typeof metadata.limit === "number" ? metadata.limit : 3,
-    "--limit",
-  );
+  const limit = opts.allFiles
+    ? rankings.rankings.length
+    : parsePositiveInt(
+        opts.limit,
+        typeof metadata.limit === "number" ? metadata.limit : 3,
+        "--limit",
+      );
   const concurrency = parsePositiveInt(opts.concurrency, 1, "--concurrency");
   const maxTokens = parseOptionalPositiveInt(opts.maxTokens, "--max-tokens");
   const maxCostUsd = parseOptionalPositiveNumber(opts.maxCostUsd, "--max-cost-usd");
@@ -2944,15 +3054,15 @@ export async function exploreRetryCommand(rawOpts: ExploreRetryOptions): Promise
     typeof metadata.maxTurns === "number" ? metadata.maxTurns : 40,
     "--max-turns",
   );
-  const stubModel = opts.stubModel === true || metadata.stubModel === true;
-  const model = stubModel
-    ? "stub-explore"
-    : (opts.model ??
-      (typeof metadata.model === "string" ? metadata.model : OPENROUTER_DEFAULT_MODEL));
-  const client = maybeBudgetModelClient(
-    stubModel ? new StubExploreModelClient() : new OpenRouterResponsesClient(),
-    { maxTokens, maxCostUsd },
-  );
+  const modelConfig = resolveExploreModelConfig(opts, {
+    model: stringValue(metadata.model),
+    provider: stringValue(metadata.modelProvider),
+    rankModel: stringValue(metadata.rankModel),
+    reasoningEffort: stringValue(metadata.reasoningEffort),
+    stubModel: metadata.stubModel === true,
+  });
+  const { model } = modelConfig;
+  const client = createExploreModelClient(modelConfig, { maxTokens, maxCostUsd });
   const selected = selectTopRankedFiles(rankings.rankings, limit);
   const retryTargets = selected
     .map((focus, index) => ({
@@ -2966,14 +3076,39 @@ export async function exploreRetryCommand(rawOpts: ExploreRetryOptions): Promise
   console.log(`  project: ${projectId}`);
   console.log(`  root:    ${root}`);
   console.log(`  model:   ${model}`);
+  console.log(`  provider: ${modelConfig.stubModel ? "stub" : modelConfig.provider}`);
   console.log(`  runtime: ${runtime}`);
   console.log(
     `  targets: ${retryTargets.length}${opts.all ? " (all selected attempts)" : " failed/missing attempts"}`,
   );
+  emit({
+    kind: "run-start",
+    at: new Date().toISOString(),
+    runId,
+    projectId,
+    detail: `retry ${runId} · ${retryTargets.length} failed/missing attempt(s)`,
+  });
 
   if (retryTargets.length === 0) {
     console.log(`${GREEN}No failed or missing attempts to retry.${RESET}`);
+    emit({
+      kind: "run-complete",
+      at: new Date().toISOString(),
+      runId,
+      projectId,
+      detail: "no failed or missing attempts to retry",
+    });
     return;
+  }
+
+  for (const target of retryTargets) {
+    emit({
+      kind: "attempt-queued",
+      at: new Date().toISOString(),
+      attemptIndex: target.index,
+      focusFile: target.focus.filePath,
+      detail: "retry",
+    });
   }
 
   const results = await mapLimit(retryTargets, concurrency, async (target) => {
@@ -2988,6 +3123,8 @@ export async function exploreRetryCommand(rawOpts: ExploreRetryOptions): Promise
       maxTurns,
       attemptDir: target.attemptDir,
       client,
+      attemptIndex: target.index,
+      onEvent: emit,
     });
   });
 
@@ -3013,6 +3150,15 @@ export async function exploreRetryCommand(rawOpts: ExploreRetryOptions): Promise
   console.log(`  accepted findings: ${summary.acceptedFindings}`);
   const usageText = formatModelUsage(summary.usage);
   if (usageText) console.log(`  usage:             ${usageText}`);
+  emit({
+    kind: "run-complete",
+    at: new Date().toISOString(),
+    runId,
+    projectId,
+    detail: `${results.length - failures} completed · ${failures} failed · ${summary.acceptedFindings} accepted${
+      usageText ? ` · ${usageText}` : ""
+    }`,
+  });
   if (failures > 0 || summary.failedAttempts > 0) process.exitCode = 1;
 }
 
@@ -3100,9 +3246,18 @@ async function runFocusedAttempt(args: {
   maxTurns: number;
   attemptDir: string;
   client: ModelClient;
+  attemptIndex?: number;
+  onEvent?: (event: ExploreStreamEvent) => void;
 }): Promise<FocusedAttemptResult> {
+  const attemptIndex = args.attemptIndex ?? 0;
   fs.mkdirSync(args.attemptDir, { recursive: true });
   console.log(`Starting gVisor attempt for ${args.focus.filePath}...`);
+  args.onEvent?.({
+    kind: "attempt-start",
+    at: new Date().toISOString(),
+    attemptIndex,
+    focusFile: args.focus.filePath,
+  });
   let container: Awaited<ReturnType<typeof createGvisorContainer>> | null = null;
   try {
     container = await createGvisorContainer({
@@ -3122,7 +3277,16 @@ async function runFocusedAttempt(args: {
       client: args.client,
       runner: container,
       container: container.metadata,
-      onProgress: (event) => recordExploreProgress(args.attemptDir, args.focus.filePath, event),
+      onProgress: (event) => {
+        recordExploreProgress(args.attemptDir, args.focus.filePath, event);
+        args.onEvent?.({
+          kind: "progress",
+          attemptIndex,
+          focusFile: args.focus.filePath,
+          phase: "explore",
+          event,
+        });
+      },
     });
     if (attempt.report.outcome === "bug") {
       const validationContainer = await createGvisorContainer({
@@ -3150,13 +3314,21 @@ async function runFocusedAttempt(args: {
             runner: validationContainer,
             container: validationContainer.metadata,
             maxTurns: Math.min(args.maxTurns, 8),
-            onProgress: (event) =>
+            onProgress: (event) => {
               recordExploreProgress(
                 args.attemptDir,
                 `${args.focus.filePath} validation`,
                 event,
                 "validation-events.jsonl",
-              ),
+              );
+              args.onEvent?.({
+                kind: "progress",
+                attemptIndex,
+                focusFile: args.focus.filePath,
+                phase: "validate",
+                event,
+              });
+            },
           }).catch(
             (err): ValidationResult => ({
               verdict: {
@@ -3197,6 +3369,16 @@ async function runFocusedAttempt(args: {
         attempt.validation ? ` (${attempt.validation.verdict})` : ""
       }`,
     );
+    args.onEvent?.({
+      kind: "attempt-finish",
+      at: new Date().toISOString(),
+      attemptIndex,
+      focusFile: args.focus.filePath,
+      outcome: attempt.report.outcome,
+      detail: attempt.validation
+        ? `${attempt.report.outcome} (${attempt.validation.verdict})`
+        : attempt.report.outcome,
+    });
     return { ok: true, attempt };
   } catch (err) {
     const failure: ExploreAttemptFailure = {
@@ -3214,6 +3396,13 @@ async function runFocusedAttempt(args: {
         err instanceof Error ? err.message : String(err)
       }${RESET}`,
     );
+    args.onEvent?.({
+      kind: "attempt-fail",
+      at: new Date().toISOString(),
+      attemptIndex,
+      focusFile: args.focus.filePath,
+      detail: err instanceof Error ? err.message : String(err),
+    });
     return { ok: false, failure };
   } finally {
     await container?.cleanup();
@@ -3266,6 +3455,101 @@ function shorten(value: string, max: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max - 1)}…`;
+}
+
+interface ResolvedExploreModelConfig {
+  provider: ExploreModelProvider;
+  model: string;
+  rankModel: string;
+  reasoningEffort: string;
+  stubModel: boolean;
+}
+
+interface StoredExploreModelConfig {
+  provider?: string;
+  model?: string;
+  rankModel?: string;
+  reasoningEffort?: string;
+  stubModel?: boolean;
+}
+
+function resolveExploreModelConfig(
+  opts: ExploreOptions,
+  stored: StoredExploreModelConfig = {},
+): ResolvedExploreModelConfig {
+  const stubModel = opts.stubModel === true || stored.stubModel === true;
+  const provider = parseExploreModelProvider(opts.modelProvider ?? stored.provider ?? "openrouter");
+  const defaultModel =
+    provider === "codex-app-server" ? CODEX_APP_SERVER_DEFAULT_MODEL : OPENROUTER_DEFAULT_MODEL;
+  const model = stubModel ? "stub-explore" : (opts.model ?? stored.model ?? defaultModel);
+  const rankModel = stubModel ? "stub-explore" : (opts.rankModel ?? stored.rankModel ?? model);
+  return {
+    provider,
+    model,
+    rankModel,
+    reasoningEffort: opts.reasoningEffort ?? stored.reasoningEffort ?? "high",
+    stubModel,
+  };
+}
+
+function parseExploreModelProvider(value: string): ExploreModelProvider {
+  if (value === "openrouter" || value === "codex-app-server") return value;
+  if (value === "stub") return "openrouter";
+  throw new Error(
+    `--model-provider must be "openrouter" or "codex-app-server"; got ${JSON.stringify(value)}.`,
+  );
+}
+
+function createExploreModelClient(
+  config: ResolvedExploreModelConfig,
+  budget: { maxTokens?: number; maxCostUsd?: number },
+): ModelClient {
+  const client = config.stubModel
+    ? new StubExploreModelClient()
+    : config.provider === "codex-app-server"
+      ? new CodexAppServerClient({ reasoningEffort: config.reasoningEffort })
+      : new OpenRouterResponsesClient();
+  return maybeBudgetModelClient(client, budget);
+}
+
+async function rankProductionFiles(args: {
+  client: ModelClient;
+  files: SourceFileSummary[];
+  model: string;
+  onBatch?: (batch: number, total: number) => void;
+}): Promise<{ rankings: RankedFile[]; usage?: ModelUsage }> {
+  const batchSize = 80;
+  const batchCount = Math.ceil(args.files.length / batchSize);
+  const rankings: RankedFile[] = [];
+  let usage: ModelUsage | undefined;
+  for (let offset = 0; offset < args.files.length; offset += batchSize) {
+    const batchNumber = Math.floor(offset / batchSize) + 1;
+    args.onBatch?.(batchNumber, batchCount);
+    const files = args.files.slice(offset, offset + batchSize);
+    const response = await args.client.complete({
+      model: args.model,
+      temperature: 0.1,
+      responseFormat: RANKING_RESPONSE_FORMAT,
+      messages: [
+        { role: "system", content: "You rank source files for local security exploration." },
+        { role: "user", content: rankingPrompt(files) },
+      ],
+    });
+    rankings.push(...normalizeRankings(files, parseRankingsFromText(response.text)));
+    usage = addModelUsage(usage, response.usage);
+  }
+  rankings.sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath));
+  return { rankings, ...(usage ? { usage } : {}) };
+}
+
+function assertExploreSelectionOptions(opts: ExploreOptions): void {
+  if (opts.allFiles && opts.limit !== undefined) {
+    throw new Error("Pass either --all-files or --limit, not both.");
+  }
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 async function mapLimit<T, R>(

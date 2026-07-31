@@ -16,6 +16,11 @@
   "scripts": {
     "build": "tsc --build",
     "bundle": "pnpm --filter deepsec bundle",
+    "canvas:build": "pnpm --filter @deepsec/canvas build",
+    "canvas:dev": "pnpm --filter @deepsec/canvas dev",
+    "canvas:simulate": "pnpm --filter @deepsec/canvas simulate",
+    "canvas:live": "pnpm --filter @deepsec/canvas live",
+    "canvas:replay": "pnpm --filter @deepsec/canvas replay",
     "deepsec": "tsx packages/deepsec/src/cli.ts",
     "test": "vitest run",
     "test:unit": "vitest run --project core --project scanner --project processor --project cli",

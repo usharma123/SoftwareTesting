@@ -1,0 +1,34 @@
+{
+  "name": "@deepsec/canvas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "bridge": "node server/index.mjs",
+    "build": "tsc --build --pretty false && vite build",
+    "dev": "vite --host 127.0.0.1",
+    "simulate": "pnpm build && node server/index.mjs --simulate",
+    "live": "pnpm build && node server/index.mjs --live",
+    "replay": "pnpm build && node server/index.mjs --replay",
+    "start": "pnpm build && node server/index.mjs",
+    "test": "node server/scripts/smoke.mjs",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@tldraw/assets": "5.2.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tldraw": "5.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.12",
+    "@types/react": "19.2.9",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.2"
+  }
+}

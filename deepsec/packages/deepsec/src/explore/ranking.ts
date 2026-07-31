@@ -37,7 +37,7 @@ const HIGH_VALUE_PATTERNS = [
   /validation|validate|escape|sanitize|filter/i,
 ];
 
-const CONTAINER_INVENTORY_OUTPUT_LIMIT = 2_000_000;
+const CONTAINER_INVENTORY_OUTPUT_LIMIT = 16_000_000;
 
 export function collectProductionFileSummaries(root: string, limit = 80): SourceFileSummary[] {
   const absoluteRoot = path.resolve(root);

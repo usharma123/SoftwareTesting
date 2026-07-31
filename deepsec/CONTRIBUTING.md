@@ -51,7 +51,9 @@ make explore-harness PROJECT_ID=<id> TARGET_ROOT=<path>
 The Make target calls `scripts/explore-harness.sh`, which runs setup, doctor,
 explore, CI artifact generation, manifest creation, and evidence-bundle
 verification. Run it from the repo root so `.env.local` or `.env` is picked up
-by the CLI. Add `STUB_MODEL=1` for a no-OpenRouter harness smoke test. The
+by the CLI. The contributor harness defaults to the locally authenticated Codex
+app-server; set `MODEL_PROVIDER=openrouter` and an OpenRouter model to use the
+direct Responses endpoint instead. Add `STUB_MODEL=1` for a no-model harness smoke test. The
 script reuses the local explore image when it already exists; add
 `FORCE_SETUP=1` to rebuild it. Fresh checkouts should run `corepack enable`,
 `pnpm install`, and `pnpm bundle` first because the script uses the bundled CLI
